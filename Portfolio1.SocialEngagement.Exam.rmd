@@ -1,0 +1,176 @@
+---
+title: "SocialEngagement"
+author: 'Caroline Casey'
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pre-processing of data 
+
+```{r cars}
+
+library(pacman)
+p_load(tidyverse, stringr, lme4, lmerTest, groupdata2, cvms, optimx, jpeg, grid, pastecs, knitr)
+setwd("C:/Users/kilda/OneDrive/Documents/R/EyeTracking")
+
+samples = read.csv("SamplesV1.csv")
+saccades = read.csv("SaccadesV1.csv")
+fixations = read.csv("FixationsV1.csv")
+
+
+colnames(log1)[2] = ("ParticipantID")
+colnames(log2)[2] = ("ParticipantID")
+colnames(log3)[2] = ("ParticipantID")
+colnames(log4)[2] = ("ParticipantID")
+colnames(log5)[2] = ("ParticipantID")
+colnames(log6)[2] = ("ParticipantID")
+
+colnames(log1)[1] = ("Trial")
+colnames(log2)[1] = ("Trial")
+colnames(log3)[1] = ("Trial")
+colnames(log4)[1] = ("Trial")
+colnames(log5)[1] = ("Trial")
+colnames(log6)[1] = ("Trial")
+
+# merging, adding +1 to trial bc python starts at 0 and R starts at 1 
+
+library(dplyr)
+all_logs = rbind(log1, log2, log3, log4, log5, log6)
+all_logs$Trial = all_logs$Trial+1
+
+## Ostensiveness 
+for (file in 1:nrow(all_logs)){
+  if (grepl("+", all_logs$video[file])){
+    all_logs$Ostensiveness[file] = "1"}
+if (grepl("-", all_logs$video[file])){
+  all_logs$Ostensiveness[file] = "0"}}
+
+## Orientation 
+for (file in 1:nrow(all_logs)){
+  if (grepl("dir", all_logs$video[file])){
+    all_logs$Orientation[file] = "Directed"}
+if (grepl("div", all_logs$video[file])){
+  all_logs$Orientation[file] = "Diverted"}}
+
+
+## merging all log and the V1 files!! (KEEP TRUE)
+samples_joined = merge(samples, all_logs, by = "ParticipantID", all = TRUE)
+fixations_joined = merge(fixations, all_logs, by = "ParticipantID", all = TRUE)
+saccades_joined = merge(saccades, all_logs, by = "ParticipantID", all = TRUE)
+
+
+```
+
+## Analysis - Models & Cross Validation 
+```{r}
+## loading V2 files
+samples2 = read.csv("SamplesV2.csv")
+saccades2 = read.csv("SaccadesV2.csv")
+fixations2 = read.csv("FixationsV2.csv")
+
+# more libraries 
+
+library(MuMIn)
+library(cvTools)
+library(cvms)
+
+
+## Cross Validation 
+
+models = c("PupilSize ~ Ostension*Directionality*Trial*Fixation + (1+Directionality*Ostension*Trial*Fixation|ParticipantID)",
+                "PupilSize ~ Ostension*Directionality+Trial+Fixation + (1+Directionality*Ostension*Trial*Fixation|ParticipantID)",
+                "PupilSize ~ Ostension+Directionality+Trial+Fixation + (1+Directionality*Ostension*Trial*Fixation|ParticipantID)",
+                "PupilSize ~ Ostension*Directionality + Fixation + (1+Directionality*Ostension|ParticipantID)", 
+           "PupilSize ~ Ostension+Directionality+Fixation+ 1+Directionality*Ostension*Fixation|ParticipantID)")
+
+
+
+socialData = subset(fixations2, Task == 'SocialEngagement')
+
+set.seed(1)
+
+foldSocial =  fold(socialData, k = 3, cat_col = 'Directionality', 'Ostention', id_col = 'ParticipantID') %>%
+  arrange(.folds)
+
+
+## cross validation 
+CVmodels = cross_validate(foldSocial, models, 
+                     folds_col = '.folds', 
+                     family='gaussian', 
+                     REML = FALSE)
+
+CVmodels
+
+
+## testing the model on the data 
+## RMSE and cross validation really shit, so gonna check all models anywayz 
+# model with best RMSE = Ostension*Directionality*Trial*Fixation + (1+Directionality*Ostension*Trial*Fixation|ParticipantID)
+
+socialmodel = lmer(PupilSize ~ Ostension*Directionality*Trial*Fixation + (1+Directionality*Ostension*Trial*Fixation|ParticipantID), data = fixations2, REML = FALSE)
+summary(socialmodel)
+
+socialmodel2 = lmer(PupilSize ~ Ostension*Directionality+Trial + Fixation +  (1+Directionality*Ostension*Trial*Fixation|ParticipantID), data = fixations2, REML = FALSE)
+summary(socialmodel2)
+
+socialmodel3 = lmer(PupilSize ~ Ostension+Directionality +Trial + Fixation + (1+Directionality*Ostension*Trial*Fixation|ParticipantID), data = fixations2, REML = FALSE)
+summary(socialmodel3)
+
+
+socialmodel4 = lmer(PupilSize ~ Ostension*Directionality + Fixation + (1+Directionality*Ostension*Fixation|ParticipantID), data = fixations2, REML = FALSE)
+summary(socialmodel4)
+# fixation significant! 
+# Fixed effects:
+#                              Estimate Std. Error       df t value Pr(>|t|)    
+#(Intercept)                   1795.718    209.309    6.559   8.579 8.43e-05 ***
+#Ostension+o                     -1.388     47.673    6.344  -0.029  0.97766    
+#Directionalitydiv              -40.840     88.660    6.905  -0.461  0.65922    
+#Fixation                        28.750      6.809    6.679   4.222  0.00436 ** 
+#Ostension+o:Directionalitydiv  -67.545     87.219    7.326  -0.774  0.46293  
+
+socialmodel5 = lmer(PupilSize ~ Ostension+Directionality + Fixation + (1+Directionality*Ostension*Fixation|ParticipantID), data = fixations2, REML = FALSE)
+summary(socialmodel5)
+
+# fixation significant! 
+#Fixed effects:
+#                  Estimate Std. Error       df t value Pr(>|t|)    
+# (Intercept)       1816.246    204.117    6.949   8.898  4.8e-05 ***
+#Ostension+o        -24.653     33.490    6.462  -0.736  0.48752    
+#Directionalitydiv  -97.844     46.988    7.131  -2.082  0.07509 .  
+#Fixation            30.545      6.238    6.665   4.897  0.00202 ** 
+
+
+
+```
+
+## Analysis - Plots 
+```{r pressure, echo=FALSE}
+plot(pressure)
+
+## Ostenstion Pupil Size 
+
+ggplot(subset(fixations2, Task == 'SocialEngagement'), aes(ParticipantGender, PupilSize, colour = ParticipantGender)) + 
+  geom_boxplot() +
+  facet_grid(.~Ostension)
+
+
+
+## Boxplot of pupil size dependent on directionality across participant gender.
+
+ggplot(subset(fixations2, Task == 'SocialEngagement'), aes(ParticipantGender, PupilSize, colour = ParticipantGender)) + 
+  geom_boxplot() +
+  facet_grid(.~Directionality)
+
+
+# boxplot of pupil size across participants dependent on directionality (colour) and ostensiveness
+ggplot(subset(fixations2, Task == 'SocialEngagement'), aes(ParticipantGender, PupilSize, colour = Directionality)) + 
+  geom_boxplot() +
+  facet_grid(.~Ostension)
+
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
